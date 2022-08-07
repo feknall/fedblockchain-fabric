@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<checkstyle version="8.21">
+<file name="/home/hamid/Documents/fabric-samples/asset-transfer-basic/chaincode-java/src/main/java/org/hyperledger/fabric/samples/assettransfer/Chaincode.java">
+</file>
+<file name="/home/hamid/Documents/fabric-samples/asset-transfer-basic/chaincode-java/src/main/java/org/hyperledger/fabric/samples/assettransfer/Client.java">
+</file>
+<file name="/home/hamid/Documents/fabric-samples/asset-transfer-basic/chaincode-java/src/main/java/org/hyperledger/fabric/samples/assettransfer/Model.java">
+</file>
+</checkstyle>
