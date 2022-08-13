@@ -4,9 +4,7 @@
 
 package org.hyperledger.fabric.samples.assettransfer;
 
-import com.google.common.hash.Hashing;
-import com.google.common.io.BaseEncoding;
-import com.owlike.genson.Genson;
+import com.google.gson.Gson;
 import org.hyperledger.fabric.contract.Context;
 import org.hyperledger.fabric.contract.ContractInterface;
 import org.hyperledger.fabric.contract.annotation.Contact;
@@ -17,6 +15,7 @@ import org.hyperledger.fabric.contract.annotation.License;
 import org.hyperledger.fabric.contract.annotation.Transaction;
 import org.hyperledger.fabric.shim.ChaincodeException;
 import org.hyperledger.fabric.shim.ChaincodeStub;
+import org.hyperledger.fabric.shim.ledger.CompositeKey;
 import org.hyperledger.fabric.shim.ledger.KeyValue;
 import org.hyperledger.fabric.shim.ledger.QueryResultsIterator;
 
@@ -36,161 +35,146 @@ import java.util.logging.Logger;
                         name = "Apache 2.0 License",
                         url = "http://www.apache.org/licenses/LICENSE-2.0.html"),
                 contact = @Contact(
-                        email = "a.transfer@example.com",
-                        name = "Adrian Transfer",
+                        email = "h.fazli.k@gmail.com",
+                        name = "Hamid Fazli",
                         url = "https://hyperledger.example.com")))
 @Default
 public final class Chaincode implements ContractInterface {
 
     private final Logger logger = Logger.getLogger(getClass().toString());
 
-    private final Genson genson = new Genson();
-
-    private enum AssetTransferErrors {
-        ASSET_NOT_FOUND,
-        ASSET_ALREADY_EXISTS,
+    private enum ChaincodeErrors {
+        MODEL_NOT_FOUND,
+        MODEL_ALREADY_EXISTS,
         CLIENT_NOT_FOUND,
-        CLIENT_ALREADY_EXISTS
+        CLIENT_ALREADY_EXISTS,
+        INVALID_ACCESS
     }
 
-    /**
-     * Creates some initial assets on the ledger.
-     *
-     * @param ctx the transaction context
-     */
+    static final String MODEL_KEY_PREFIX = "model";
+    static final String MODEL_SECRET_KEY_PREFIX = "modelSecret";
+    static final String MODEL_ROUND_KEY_PREFIX = "modelRound";
+    static final String AGGREGATED_MODEL_SECRET_PREFIX = "aggregatedModelSecret";
+    static final String AGGREGATED_MODEL_COLLECTION_NAME = "aggregatedModelCollection";
+
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public void InitLedger(final Context ctx) {
         ChaincodeStub stub = ctx.getStub();
 
-        CreateClient(ctx, "client1", "client1Name", "cin1", true);
-        CreateClient(ctx, "client2", "client2Name", "cin2", true);
-        CreateClient(ctx, "client3", "client3Name", "cin3", true);
-        CreateClient(ctx, "client4", "client4Name", "cin4", true);
-        CreateClient(ctx, "client5", "client5Name", "cin5", true);
-        CreateClient(ctx, "client6", "client6Name", "cin6", true);
+        CreateModel(ctx, "1", "First Legendary Model");
+//        CreateClient(ctx, "client1", "client1Name", "cin1", true);
+//        CreateClient(ctx, "client2", "client2Name", "cin2", true);
+//        CreateClient(ctx, "client3", "client3Name", "cin3", true);
+//        CreateClient(ctx, "client4", "client4Name", "cin4", true);
+//        CreateClient(ctx, "client5", "client5Name", "cin5", true);
+//        CreateClient(ctx, "client6", "client6Name", "cin6", true);
 
     }
 
-    /**
-     * Creates a new asset on the ledger.
-     *
-     * @param ctx the transaction context
-     * @return the created asset
-     */
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public Model AddModelUpdate(final Context ctx, final String id, final String round, final String weights) {
+    public Model AddModelSecret(final Context ctx, final String modelId, final String round, final String weights) {
         ChaincodeStub stub = ctx.getStub();
 
-        try {
-            byte[] weightsArr = BaseEncoding.base64().decode(weights);
-            String hash = Hashing.sha256()
-                    .hashBytes(weightsArr)
-                    .toString();
-            logger.log(Level.SEVERE, "Fuch me");
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Fuch you", e);
-        }
-
-
-//
-//        String uuid = "model-" + id + "-" + round;
-//        try {
-//            Files.write(Paths.get("/home/" + uuid), weightsArr);
-//        } catch (IOException e) {
-//            throw new ChaincodeException("Write file problem" + e.toString(), AssetTransferErrors.ASSET_NOT_FOUND.toString());
-//        }
-//
-//        Model asset = new Model(id, round, hash, uuid);
-//        String sortedJson = genson.serialize(asset);
-//        stub.putStringState(uuid, sortedJson);
-
-        return new Model(id, round, "1", "1");
-    }
-
-    /**
-     * Retrieves an asset with the specified ID from the ledger.
-     *
-     * @param ctx     the transaction context
-     * @param assetID the ID of the asset
-     * @return the asset found on the ledger if there was one
-     */
-    @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public Model ReadAsset(final Context ctx, final String assetID) {
-        ChaincodeStub stub = ctx.getStub();
-        String assetJSON = stub.getStringState(assetID);
-
-        if (assetJSON == null || assetJSON.isEmpty()) {
-            String errorMessage = String.format("Asset %s does not exist", assetID);
+        String modelJson = stub.getStringState(modelId);
+        if (modelJson == null || modelJson.isEmpty()) {
+            String errorMessage = String.format("Model %s does not exist", modelId);
             System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.MODEL_NOT_FOUND.toString());
         }
 
-        Model asset = genson.deserialize(assetJSON, Model.class);
-        return asset;
+        logger.log(Level.INFO, "Model Json: " + modelJson);
+        Model model = Model.deserialize(modelJson);
+
+        ModelUpdate modelUpdate = new ModelUpdate(modelId, round, weights);
+        String modelUpdateJson = modelUpdate.serialize();
+
+        String collectionName = getModelUpdateCollection(ctx);
+        String key = stub.createCompositeKey(MODEL_SECRET_KEY_PREFIX, modelId, round, ctx.getClientIdentity().getId()).toString();
+        stub.putPrivateData(collectionName, key, modelUpdateJson);
+        logger.log(Level.INFO, "ModelUpdate " + key + " stored successfully in " + collectionName);
+        logger.log(Level.INFO, "ModelUpdate JSON: " + modelUpdateJson);
+        return model;
     }
 
-//    /**
-//     * Updates the properties of an asset on the ledger.
-//     *
-//     * @param ctx            the transaction context
-//     * @param assetID        the ID of the asset being updated
-//     * @param color          the color of the asset being updated
-//     * @param size           the size of the asset being updated
-//     * @param owner          the owner of the asset being updated
-//     * @param appraisedValue the appraisedValue of the asset being updated
-//     * @return the transferred asset
-//     */
+    @Transaction(intent = Transaction.TYPE.SUBMIT)
+    public Model AddAggregatedSecret(final Context ctx, final String modelId, final String round, final String weights) {
+        ChaincodeStub stub = ctx.getStub();
+
+        String modelJson = stub.getStringState(modelId);
+        if (modelJson == null || modelJson.isEmpty()) {
+            String errorMessage = String.format("Model %s does not exist", modelId);
+            System.out.println(errorMessage);
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.MODEL_NOT_FOUND.toString());
+        }
+
+        logger.log(Level.INFO, "Model Json: " + modelJson);
+        Model model = Model.deserialize(modelJson);
+
+        ModelUpdate modelUpdate = new ModelUpdate(modelId, round, weights);
+        String modelUpdateJson = modelUpdate.serialize();
+
+        String key = stub.createCompositeKey(AGGREGATED_MODEL_SECRET_PREFIX, modelId, round, ctx.getClientIdentity().getId()).toString();
+        stub.putPrivateData(AGGREGATED_MODEL_COLLECTION_NAME, key, modelUpdateJson);
+        logger.log(Level.INFO, "AggregatedModelUpdate " + key + " stored successfully in " + AGGREGATED_MODEL_COLLECTION_NAME);
+        logger.log(Level.INFO, "ModelUpdate JSON: " + modelUpdateJson);
+        return model;
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public ModelUpdate[] ReadAggregatedModelUpdates(final Context ctx, final String modelId, final String round) throws Exception {
+        ChaincodeStub stub = ctx.getStub();
+        String collectionName = getModelUpdateCollection(ctx);
+        CompositeKey key = stub.createCompositeKey(AGGREGATED_MODEL_SECRET_PREFIX, modelId, round);
+        List<ModelUpdate> modelUpdateList = new ArrayList<>();
+        try (QueryResultsIterator<KeyValue> results = stub.getPrivateDataByPartialCompositeKey(collectionName, key)) {
+            for (KeyValue result : results) {
+                if (result.getStringValue() == null || result.getStringValue().length() == 0) {
+                    logger.log(Level.SEVERE, "Invalid AggregatedModelUpdate json: %s\n", result.getStringValue());
+                    continue;
+                }
+                ModelUpdate modelUpdate = ModelUpdate.deserialize(result.getStringValue());
+                modelUpdateList.add(modelUpdate);
+                logger.log(Level.INFO, String.format("Round %s of Model %s read successfully", modelUpdate.getRound(), modelUpdate.getModelId()));
+            }
+        }
+
+        return modelUpdateList.toArray(new ModelUpdate[0]);
+    }
+
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public ModelUpdate[] ReadModelSecrets(final Context ctx, final String modelId, final String round) throws Exception {
+        ChaincodeStub stub = ctx.getStub();
+        String collectionName = getModelUpdateCollection(ctx);
+        CompositeKey key = stub.createCompositeKey(MODEL_SECRET_KEY_PREFIX, modelId, round);
+        List<ModelUpdate> modelUpdateList = new ArrayList<>();
+        try (QueryResultsIterator<KeyValue> results = stub.getPrivateDataByPartialCompositeKey(collectionName, key)) {
+            for (KeyValue result : results) {
+                if (result.getStringValue() == null || result.getStringValue().length() == 0) {
+                    logger.log(Level.SEVERE, "Invalid ModelUpdate json: %s\n", result.getStringValue());
+                    continue;
+                }
+                ModelUpdate modelUpdate = ModelUpdate.deserialize(result.getStringValue());
+                modelUpdateList.add(modelUpdate);
+                logger.log(Level.INFO, String.format("Round %s of Model %s read successfully", modelUpdate.getRound(), modelUpdate.getModelId()));
+            }
+        }
+
+        return modelUpdateList.toArray(new ModelUpdate[0]);
+    }
+//
 //    @Transaction(intent = Transaction.TYPE.SUBMIT)
-//    public Model UpdateAsset(final Context ctx, final String assetID, final String color, final int size,
-//                             final String owner, final int appraisedValue) {
+//    public void DeleteModel(final Context ctx, final String uuid) {
 //        ChaincodeStub stub = ctx.getStub();
 //
 //        if (!AssetExists(ctx, assetID)) {
 //            String errorMessage = String.format("Asset %s does not exist", assetID);
 //            System.out.println(errorMessage);
-//            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
+//            throw new ChaincodeException(errorMessage, ChaincodeErrors.MODEL_NOT_FOUND.toString());
 //        }
 //
-//        Random random = new Random();
-//        byte[] model = new byte[10000000];
-//        random.nextBytes(model);
-//        String uuid = "123456789";
-//        try {
-//            Files.write(Paths.get("/home/" + uuid), model);
-//        } catch (IOException e) {
-//            throw new ChaincodeException("Write file problem" + e.toString(), AssetTransferErrors.ASSET_NOT_FOUND.toString());
-//        }
-//
-//        String modelHash = "123";
-////        String modelHash = Hashing.sha256()
-////                .hashBytes(model)
-////                .toString();
-//
-//        Model newAsset = new Model(assetID, color, size, owner, appraisedValue, modelHash, uuid);
-//        //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
-//        String sortedJson = genson.serialize(newAsset);
-//        stub.putStringState(assetID, sortedJson);
-//        return newAsset;
+//        stub.delState(assetID);
 //    }
-
-    /**
-     * Deletes asset on the ledger.
-     *
-     * @param ctx     the transaction context
-     * @param assetID the ID of the asset being deleted
-     */
-    @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public void DeleteAsset(final Context ctx, final String assetID) {
-        ChaincodeStub stub = ctx.getStub();
-
-        if (!AssetExists(ctx, assetID)) {
-            String errorMessage = String.format("Asset %s does not exist", assetID);
-            System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.ASSET_NOT_FOUND.toString());
-        }
-
-        stub.delState(assetID);
-    }
 
     /**
      * Checks the existence of the asset on the ledger
@@ -270,14 +254,31 @@ public final class Chaincode implements ContractInterface {
         QueryResultsIterator<KeyValue> results = stub.getStateByRange("", "");
 
         for (KeyValue result : results) {
-            Model asset = genson.deserialize(result.getStringValue(), Model.class);
+            Model asset = new Gson().fromJson(result.getStringValue(), Model.class);
             System.out.println(asset);
             queryResults.add(asset);
         }
 
-        final String response = genson.serialize(queryResults);
+        final String response = new Gson().toJson(queryResults);
 
         return response;
+    }
+
+    @Transaction(intent = Transaction.TYPE.SUBMIT)
+    public Model CreateModel(final Context ctx, final String modelId, final String modelName) {
+        ChaincodeStub stub = ctx.getStub();
+
+        if (ModelExists(ctx, modelId)) {
+            String errorMessage = String.format("Model %s already exists", modelId);
+            logger.log(Level.SEVERE, errorMessage);
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.MODEL_ALREADY_EXISTS.toString());
+        }
+
+        Model model = new Model(modelId, modelName);
+        String json = model.serialize();
+        String key = stub.createCompositeKey(MODEL_KEY_PREFIX, modelId).toString();
+        stub.putStringState(key, json);
+        return model;
     }
 
 
@@ -289,7 +290,7 @@ public final class Chaincode implements ContractInterface {
         if (ClientExists(ctx, clientID)) {
             String errorMessage = String.format("Client %s already exists", clientID);
             System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.CLIENT_ALREADY_EXISTS.toString());
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.CLIENT_ALREADY_EXISTS.toString());
         }
 
 //        Random random = new Random();
@@ -312,7 +313,7 @@ public final class Chaincode implements ContractInterface {
 
         Client client = new Client(clientID, name, cinNumber, active);
         //Use Genson to convert the Asset into string, sort it alphabetically and serialize it into a json string
-        String sortedJson = genson.serialize(client);
+        String sortedJson = new Gson().toJson(client);
         stub.putStringState(clientID, sortedJson);
 
         return client;
@@ -333,10 +334,10 @@ public final class Chaincode implements ContractInterface {
         if (clientJSON == null || clientJSON.isEmpty()) {
             String errorMessage = String.format("Client %s does not exist", clientID);
             System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.CLIENT_NOT_FOUND.toString());
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.CLIENT_NOT_FOUND.toString());
         }
 
-        return genson.deserialize(clientJSON, Client.class);
+        return new Gson().fromJson(clientJSON, Client.class);
     }
 
     /**
@@ -353,12 +354,12 @@ public final class Chaincode implements ContractInterface {
         if (!ClientExists(ctx, clientID)) {
             String errorMessage = String.format("Client %s does not exist", clientID);
             System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.CLIENT_NOT_FOUND.toString());
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.CLIENT_NOT_FOUND.toString());
         }
 
         Client newClient = new Client(clientID, name, cinNumber, active);
 
-        String sortedJson = genson.serialize(newClient);
+        String sortedJson = new Gson().toJson(newClient);
         stub.putStringState(clientID, sortedJson);
         return newClient;
     }
@@ -376,7 +377,7 @@ public final class Chaincode implements ContractInterface {
         if (!ClientExists(ctx, clientID)) {
             String errorMessage = String.format("Client %s does not exist", clientID);
             System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.CLIENT_NOT_FOUND.toString());
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.CLIENT_NOT_FOUND.toString());
         }
 
         stub.delState(clientID);
@@ -397,6 +398,14 @@ public final class Chaincode implements ContractInterface {
         return (clientJson != null && !clientJson.isEmpty());
     }
 
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public boolean ModelExists(final Context ctx, final String modelId) {
+        ChaincodeStub stub = ctx.getStub();
+        String modelJson = stub.getStringState(modelId);
+
+        return (modelJson != null && !modelJson.isEmpty());
+    }
+
     /**
      * Changes the owner of a asset on the ledger.
      *
@@ -411,13 +420,13 @@ public final class Chaincode implements ContractInterface {
         if (clientJSON == null || clientJSON.isEmpty()) {
             String errorMessage = String.format("Client %s does not exist", clientID);
             System.out.println(errorMessage);
-            throw new ChaincodeException(errorMessage, AssetTransferErrors.CLIENT_NOT_FOUND.toString());
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.CLIENT_NOT_FOUND.toString());
         }
 
-        Client client = genson.deserialize(clientJSON, Client.class);
+        Client client = new Gson().fromJson(clientJSON, Client.class);
 
         Client newClient = new Client(client.getClientID(), client.getName(), client.getCinNumber(), alive);
-        String sortedJson = genson.serialize(newClient);
+        String sortedJson = new Gson().toJson(newClient);
         stub.putStringState(clientID, sortedJson);
 
         return newClient.isAlive();
@@ -442,11 +451,31 @@ public final class Chaincode implements ContractInterface {
         QueryResultsIterator<KeyValue> results = stub.getStateByRange("client*", "");
 
         for (KeyValue result : results) {
-            Client client = genson.deserialize(result.getStringValue(), Client.class);
+            Client client = new Gson().fromJson(result.getStringValue(), Client.class);
             System.out.println(client);
             queryResults.add(client);
         }
 
-        return genson.serialize(queryResults);
+        return new Gson().toJson(queryResults);
     }
+
+    private void verifyClientOrgMatchesPeerOrg(final Context ctx) {
+        String clientMSPID = ctx.getClientIdentity().getMSPID();
+        String peerMSPID = ctx.getStub().getMspId();
+
+        if (!peerMSPID.equals(clientMSPID)) {
+            String errorMessage = String.format("Client from org %s is not authorized to read or write private data from an org %s peer", clientMSPID, peerMSPID);
+            logger.log(Level.SEVERE, errorMessage);
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+        }
+    }
+
+    private String getModelUpdateCollection(final Context ctx) {
+        // Get the MSP ID of submitting client identity
+        String clientMSPID = ctx.getClientIdentity().getMSPID();
+        // Create the collection name
+        return clientMSPID + "PrivateCollection";
+    }
+
+
 }

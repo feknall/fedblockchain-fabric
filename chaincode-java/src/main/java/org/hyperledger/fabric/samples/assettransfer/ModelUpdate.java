@@ -12,12 +12,14 @@ import org.hyperledger.fabric.contract.annotation.Property;
 import java.util.Objects;
 
 @DataType()
-public final class Model {
+public final class ModelUpdate {
 
     @Property()
     private final String modelId;
     @Property()
-    private final String name;
+    private final String round;
+    @Property()
+    private final String weights;
 
 
     @Override
@@ -28,19 +30,20 @@ public final class Model {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        Model model = (Model) o;
-        return Objects.equals(modelId, model.modelId) && Objects.equals(name, model.name);
+        ModelUpdate modelUpdate = (ModelUpdate) o;
+        return Objects.equals(modelId, modelUpdate.modelId) && Objects.equals(round, modelUpdate.round) && Objects.equals(weights, modelUpdate.weights);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(modelId, name);
+        return Objects.hash(modelId, round, weights);
     }
 
 
-    public Model(@JsonProperty("modelId") final String modelId, @JsonProperty("name") final String name) {
+    public ModelUpdate(@JsonProperty("modelId") final String modelId, @JsonProperty("round") final String round, @JsonProperty("weights") final String weights) {
         this.modelId = modelId;
-        this.name = name;
+        this.round = round;
+        this.weights = weights;
     }
 
     public String getModelId() {
@@ -48,16 +51,20 @@ public final class Model {
     }
 
 
-    public String getName() {
-        return name;
+    public String getRound() {
+        return round;
     }
 
+    public String getWeights() {
+        return weights;
+    }
 
     @Override
     public String toString() {
         return "Model{"
-                + "modelId='" + modelId
-                + ", name='" + name
+                + "id='" + modelId
+                + ", round='" + round
+                + ", weights='" + weights
                 + '}';
     }
 
@@ -65,9 +72,8 @@ public final class Model {
         return new Gson().toJson(this);
     }
 
-    public static Model deserialize(final String ser) {
-        return new Gson().fromJson(ser, Model.class);
+    public static ModelUpdate deserialize(final String json) {
+        return new Gson().fromJson(json, ModelUpdate.class);
     }
-
 
 }
