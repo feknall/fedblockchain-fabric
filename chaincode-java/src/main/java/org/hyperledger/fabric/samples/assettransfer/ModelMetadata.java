@@ -12,7 +12,7 @@ import org.hyperledger.fabric.contract.annotation.Property;
 import java.util.Objects;
 
 @DataType()
-public final class Model {
+public final class ModelMetadata {
 
     @Property()
     private final String modelId;
@@ -28,7 +28,7 @@ public final class Model {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        Model model = (Model) o;
+        ModelMetadata model = (ModelMetadata) o;
         return Objects.equals(modelId, model.modelId) && Objects.equals(name, model.name);
     }
 
@@ -38,7 +38,7 @@ public final class Model {
     }
 
 
-    public Model(@JsonProperty("modelId") final String modelId, @JsonProperty("name") final String name) {
+    public ModelMetadata(@JsonProperty("modelId") final String modelId, @JsonProperty("name") final String name) {
         this.modelId = modelId;
         this.name = name;
     }
@@ -55,7 +55,7 @@ public final class Model {
 
     @Override
     public String toString() {
-        return "Model{"
+        return "ModelMetadata{"
                 + "modelId='" + modelId
                 + ", name='" + name
                 + '}';
@@ -65,8 +65,8 @@ public final class Model {
         return new Gson().toJson(this);
     }
 
-    public static Model deserialize(final String ser) {
-        return new Gson().fromJson(ser, Model.class);
+    public static ModelMetadata deserialize(final String ser) {
+        return new Gson().fromJson(ser, ModelMetadata.class);
     }
 
 
