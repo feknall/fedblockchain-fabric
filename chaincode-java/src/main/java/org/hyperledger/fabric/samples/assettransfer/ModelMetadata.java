@@ -9,8 +9,6 @@ import com.owlike.genson.annotation.JsonProperty;
 import org.hyperledger.fabric.contract.annotation.DataType;
 import org.hyperledger.fabric.contract.annotation.Property;
 
-import java.util.Objects;
-
 @DataType()
 public final class ModelMetadata {
 
@@ -19,47 +17,39 @@ public final class ModelMetadata {
     @Property()
     private final String name;
 
+    @Property()
+    private final String clientsPerRound;
 
-    @Override
-    public boolean equals(final Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        ModelMetadata model = (ModelMetadata) o;
-        return Objects.equals(modelId, model.modelId) && Objects.equals(name, model.name);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(modelId, name);
-    }
+    @Property()
+    private final String secretsPerClient;
 
 
-    public ModelMetadata(@JsonProperty("modelId") final String modelId, @JsonProperty("name") final String name) {
+    public ModelMetadata(@JsonProperty("modelId") final String modelId,
+                         @JsonProperty("name") final String name,
+                         @JsonProperty("clientsPerRound") final String clientsPerRound,
+                         @JsonProperty("secretsPerClient") final String secretsPerClient) {
         this.modelId = modelId;
         this.name = name;
+        this.clientsPerRound = clientsPerRound;
+        this.secretsPerClient = secretsPerClient;
     }
 
     public String getModelId() {
         return modelId;
     }
 
+    public String getClientsPerRound() {
+        return clientsPerRound;
+    }
+
+    public String getSecretsPerClient() {
+        return secretsPerClient;
+    }
 
     public String getName() {
         return name;
     }
 
-
-    @Override
-    public String toString() {
-        return "ModelMetadata{"
-                + "modelId='" + modelId
-                + ", name='" + name
-                + '}';
-    }
 
     public String serialize() {
         return new Gson().toJson(this);
