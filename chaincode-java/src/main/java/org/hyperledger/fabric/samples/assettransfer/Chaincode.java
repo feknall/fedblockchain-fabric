@@ -18,7 +18,6 @@ import org.hyperledger.fabric.shim.ledger.CompositeKey;
 import org.hyperledger.fabric.shim.ledger.KeyValue;
 import org.hyperledger.fabric.shim.ledger.QueryResultsIterator;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -46,26 +45,36 @@ public final class Chaincode implements ContractInterface {
     private enum ChaincodeErrors {
         MODEL_NOT_FOUND,
         MODEL_METADATA_ALREADY_EXISTS,
+        MODEL_METADATA_DOES_NOT_EXISTS,
+        TRAINING_NOT_FINISHED,
         INVALID_ACCESS
     }
 
-    static final String MODEL_METADATA_KEY_PREFIX = "modelMetadata";
-    static final String MODEL_SECRET_KEY_PREFIX = "modelSecret";
-    static final String MODEL_SECRET_COUNTER_KEY_PREFIX = "modelSecretCounter";
-    static final String MODEL_AGGREGATED_SECRET_COUNTER_KEY_PREFIX = "aggregatedSecretCounter";
-    static final String END_ROUND_MODEL_KEY_PREFIX = "endRoundModel";
-    static final String AGGREGATED_SECRET_KEY_PREFIX = "aggregatedModelSecret";
-    static final String AGGREGATED_MODEL_COLLECTION_NAME = "aggregatedModelCollection";
+    static final String MODEL_METADATA_KEY = "modelMetadataKey";
+    static final String MODEL_SECRET_KEY = "modelSecretKey";
+    static final String MODEL_SECRET_COUNTER_KEY = "modelSecretCounterKey";
+    static final String AGGREGATED_SECRET_COUNTER_KEY = "aggregatedSecretCounterKey";
+    static final String END_ROUND_MODEL_KEY = "endRoundModelKey";
+    static final String AGGREGATED_SECRET_KEY = "aggregatedSecretKey";
+
+    static final String AGGREGATED_SECRET_COLLECTION = "aggregatedSecretCollection";
 
     static final String AGGREGATOR_ATTRIBUTE = "aggregator";
     static final String LEAD_AGGREGATOR_ATTRIBUTE = "leadAggregator";
     static final String TRAINER_ATTRIBUTE = "trainer";
 
-
     static final String ALL_SECRETS_RECEIVED_EVENT = "ALL_SECRETS_RECEIVED_EVENT";
     static final String AGGREGATION_FINISHED_EVENT = "AGGREGATION_FINISHED_EVENT";
     static final String ROUND_FINISHED_EVENT = "ROUND_FINISHED_EVENT";
+    static final String ROUND_AND_TRAINING_FINISHED_EVENT = "ROUND_AND_TRAINING_FINISHED_EVENT";
     static final String MODEL_SECRET_ADDED_EVENT = "MODEL_SECRET_ADDED_EVENT";
+    static final String START_TRAINING_EVENT = "START_TRAINING_EVENT";
+    static final String CREATE_MODEL_METADATA_EVENT = "CREATE_MODEL_METADATA_EVENT";
+    static final String AGGREGATED_SECRET_ADDED_EVENT = "AGGREGATED_SECRET_ADDED_EVENT";
+
+    static final String MODEL_METADATA_STATUS_INITIATED = "initiated";
+    static final String MODEL_METADATA_STATUS_STARTED = "started";
+    static final String MODEL_METADATA_STATUS_FINISHED = "finished";
 
     @Transaction(intent = Transaction.TYPE.SUBMIT)
     public void InitLedger(final Context ctx) {
@@ -73,9 +82,49 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.SUBMIT)
+    public ModelMetadata StartTraining(final Context ctx, final String modelId) {
+        ChaincodeStub stub = ctx.getStub();
+        if (!ModelExists(ctx, modelId)) {
+            String errorMessage = String.format("ModelMetadata %s doesn't exists", modelId);
+            logger.log(Level.SEVERE, errorMessage);
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.MODEL_METADATA_DOES_NOT_EXISTS.toString());
+        }
+        String key = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
+        String json = stub.getStringState(key);
+        ModelMetadata oldModelMetadata = ModelMetadata.deserialize(json);
+        ModelMetadata newModelMetadata = new ModelMetadata(oldModelMetadata.getModelId(),
+                oldModelMetadata.getName(),
+                oldModelMetadata.getClientsPerRound(),
+                oldModelMetadata.getSecretsPerClient(),
+                MODEL_METADATA_STATUS_STARTED,
+                oldModelMetadata.getTrainingRounds());
+        String newJson = newModelMetadata.serialize();
+        stub.putStringState(key, newJson);
+        stub.setEvent(START_TRAINING_EVENT, newJson.getBytes());
+        return newModelMetadata;
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public EndRoundModel GetTrainedModel(final Context ctx, final String modelId) {
+        ChaincodeStub stub = ctx.getStub();
+        String modelMetadataKey = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
+        String modelMetadataJson = stub.getStringState(modelMetadataKey);
+        ModelMetadata metadata = ModelMetadata.deserialize(modelMetadataJson);
+        if (!metadata.getStatus().equals(MODEL_METADATA_STATUS_FINISHED)) {
+            String errorMessage = String.format("Training of ModelMetadata %s is not finished yet", modelId);
+            logger.log(Level.SEVERE, errorMessage);
+            throw new ChaincodeException(errorMessage, ChaincodeErrors.TRAINING_NOT_FINISHED.toString());
+        }
+
+        String key = stub.createCompositeKey(END_ROUND_MODEL_KEY, modelId, metadata.getTrainingRounds()).toString();
+        String endRoundJson = stub.getStringState(key);
+        return EndRoundModel.deserialize(endRoundJson);
+    }
+
+    @Transaction(intent = Transaction.TYPE.SUBMIT)
     public ModelMetadata CreateModelMetadata(final Context ctx, final String modelId,
                                              final String modelName, final String clientsPerRound,
-                                             final String secretsPerClient) {
+                                             final String secretsPerClient, final String trainingRounds) {
         ChaincodeStub stub = ctx.getStub();
 
         if (ModelExists(ctx, modelId)) {
@@ -84,12 +133,18 @@ public final class Chaincode implements ContractInterface {
             throw new ChaincodeException(errorMessage, ChaincodeErrors.MODEL_METADATA_ALREADY_EXISTS.toString());
         }
 
-        ModelMetadata model = new ModelMetadata(modelId, modelName, clientsPerRound, secretsPerClient);
+        ModelMetadata model = new ModelMetadata(modelId,
+                modelName,
+                clientsPerRound,
+                secretsPerClient,
+                MODEL_METADATA_STATUS_INITIATED,
+                trainingRounds);
+
         String json = model.serialize();
-        String key = stub.createCompositeKey(MODEL_METADATA_KEY_PREFIX, modelId).toString();
+        String key = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
         stub.putStringState(key, json);
 
-        stub.setEvent("CreateModelMetadata", json.getBytes(StandardCharsets.UTF_8));
+        stub.setEvent(CREATE_MODEL_METADATA_EVENT, json.getBytes());
         return model;
     }
 
@@ -106,23 +161,29 @@ public final class Chaincode implements ContractInterface {
         String modelSecretJson = modelSecret.serialize();
 
         String collectionName = getModelSecretCollectionName(ctx);
-        String secretKey = stub.createCompositeKey(MODEL_SECRET_KEY_PREFIX, modelId, round, ctx.getClientIdentity().getId()).toString();
+        String secretKey = stub.createCompositeKey(MODEL_SECRET_KEY, modelId, round, ctx.getClientIdentity().getId()).toString();
+
         stub.putPrivateData(collectionName, secretKey, modelSecretJson);
 
-        String counterKey = stub.createCompositeKey(MODEL_SECRET_COUNTER_KEY_PREFIX, modelId, round).toString();
+        String counterKey = stub.createCompositeKey(MODEL_SECRET_COUNTER_KEY, modelId, round).toString();
         String oldCounterValue = new String(stub.getPrivateData(collectionName, counterKey));
+
+        int newValue = 1;
         if (!oldCounterValue.isEmpty()) {
-            int newValue = Integer.parseInt(oldCounterValue) + 1;
-            String newValueStr = String.valueOf(newValue);
-            stub.putPrivateData(collectionName, counterKey, newValueStr);
-            stub.setEvent(MODEL_SECRET_ADDED_EVENT, newValueStr.getBytes());
-            if (newValue == Integer.parseInt(modelMetadata.getClientsPerRound())) {
-                stub.setEvent(ALL_SECRETS_RECEIVED_EVENT, modelMetadataJson.getBytes());
-            }
-        } else {
-            stub.putPrivateData(collectionName, counterKey, "1");
-            stub.setEvent(MODEL_SECRET_ADDED_EVENT, "1".getBytes());
+            newValue = Integer.parseInt(oldCounterValue) + 1;
         }
+
+        stub.putPrivateData(collectionName, counterKey, String.valueOf(newValue));
+
+        byte[] event = new ModelSecret(modelSecret.getModelId(), String.valueOf(newValue), null)
+                .serialize()
+                .getBytes();
+        stub.setEvent(MODEL_SECRET_ADDED_EVENT, event);
+
+        if (newValue == Integer.parseInt(modelMetadata.getClientsPerRound())) {
+            stub.setEvent(ALL_SECRETS_RECEIVED_EVENT, event);
+        }
+
         logger.log(Level.INFO, "ModelUpdate " + secretKey + " stored successfully in " + collectionName);
         logger.log(Level.INFO, "ModelUpdate JSON: " + modelSecretJson);
 
@@ -137,14 +198,29 @@ public final class Chaincode implements ContractInterface {
 
         String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(stub, modelId);
         ModelMetadata modelMetadata = ModelMetadata.deserialize(modelMetadataJson);
+        boolean finishTraining = Integer.parseInt(round) >= Integer.parseInt(modelMetadata.getTrainingRounds());
+        if (finishTraining) {
+            String key = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
+            ModelMetadata newModelMetadata = new ModelMetadata(modelMetadata.getModelId(),
+                    modelMetadata.getName(),
+                    modelMetadata.getClientsPerRound(),
+                    modelMetadata.getSecretsPerClient(),
+                    MODEL_METADATA_STATUS_STARTED,
+                    modelMetadata.getTrainingRounds());
+            stub.putStringState(key, newModelMetadata.serialize());
+        }
 
         EndRoundModel endRoundModel = new EndRoundModel(modelId, round, weights);
         String modelUpdateJson = endRoundModel.serialize();
 
-        String key = stub.createCompositeKey(END_ROUND_MODEL_KEY_PREFIX, modelId, round).toString();
+        String key = stub.createCompositeKey(END_ROUND_MODEL_KEY, modelId, round).toString();
         stub.putStringState(key, modelUpdateJson);
 
-        stub.setEvent(ROUND_FINISHED_EVENT, modelMetadataJson.getBytes());
+        if (finishTraining) {
+            stub.setEvent(ROUND_AND_TRAINING_FINISHED_EVENT, modelMetadataJson.getBytes());
+        } else {
+            stub.setEvent(ROUND_FINISHED_EVENT, modelMetadataJson.getBytes());
+        }
 
         logger.log(Level.INFO, "ModelUpdate " + key + " stored successfully in public :)");
         logger.log(Level.INFO, "ModelUpdate JSON: " + modelUpdateJson);
@@ -163,25 +239,29 @@ public final class Chaincode implements ContractInterface {
         AggregatedSecret aggregatedSecret = new AggregatedSecret(modelId, round, weights);
         String modelUpdateJson = aggregatedSecret.serialize();
 
-        String key = stub.createCompositeKey(AGGREGATED_SECRET_KEY_PREFIX, modelId, round, ctx.getClientIdentity().getId()).toString();
-        stub.putPrivateData(AGGREGATED_MODEL_COLLECTION_NAME, key, modelUpdateJson);
+        String key = stub.createCompositeKey(AGGREGATED_SECRET_KEY, modelId, round, ctx.getClientIdentity().getId()).toString();
+        stub.putPrivateData(AGGREGATED_SECRET_COLLECTION, key, modelUpdateJson);
 
-        String counterKey = stub.createCompositeKey(MODEL_AGGREGATED_SECRET_COUNTER_KEY_PREFIX, modelId, round).toString();
+        String counterKey = stub.createCompositeKey(AGGREGATED_SECRET_COUNTER_KEY, modelId, round).toString();
         String oldCounterValue = stub.getStringState(counterKey);
+
+        int newValue = 1;
         if (!oldCounterValue.isEmpty()) {
-            int newValue = Integer.parseInt(oldCounterValue) + 1;
-            String newValueStr = String.valueOf(newValue);
-            stub.putStringState(counterKey, newValueStr);
-            stub.setEvent(MODEL_SECRET_ADDED_EVENT, newValueStr.getBytes());
-            if (newValue == Integer.parseInt(modelMetadata.getSecretsPerClient())) {
-                stub.setEvent(AGGREGATION_FINISHED_EVENT, modelMetadataJson.getBytes());
-            }
-        } else {
-            stub.putStringState(counterKey, "1");
-            stub.setEvent(MODEL_SECRET_ADDED_EVENT, "1".getBytes());
+            newValue = Integer.parseInt(oldCounterValue) + 1;
         }
 
-        logger.log(Level.INFO, "AggregatedModelUpdate " + key + " stored successfully in " + AGGREGATED_MODEL_COLLECTION_NAME);
+        stub.putStringState(counterKey, String.valueOf(newValue));
+
+        byte[] event = new AggregatedSecret(aggregatedSecret.getModelId(), aggregatedSecret.getRound(), null)
+                .serialize()
+                .getBytes();
+        stub.setEvent(AGGREGATED_SECRET_ADDED_EVENT, event);
+
+        if (newValue == Integer.parseInt(modelMetadata.getSecretsPerClient())) {
+            stub.setEvent(AGGREGATION_FINISHED_EVENT, event);
+        }
+
+        logger.log(Level.INFO, "AggregatedModelUpdate " + key + " stored successfully in " + AGGREGATED_SECRET_COLLECTION);
         logger.log(Level.INFO, "ModelUpdate JSON: " + modelUpdateJson);
         return modelMetadata;
     }
@@ -191,7 +271,7 @@ public final class Chaincode implements ContractInterface {
         checkHasLeadAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
-        CompositeKey key = stub.createCompositeKey(AGGREGATED_SECRET_KEY_PREFIX, modelId, round);
+        CompositeKey key = stub.createCompositeKey(AGGREGATED_SECRET_KEY, modelId, round);
 
         String collectionName = getModelSecretCollectionName(ctx);
 
@@ -218,7 +298,7 @@ public final class Chaincode implements ContractInterface {
 
         ChaincodeStub stub = ctx.getStub();
         String collectionName = getModelSecretCollectionName(ctx);
-        CompositeKey key = stub.createCompositeKey(MODEL_SECRET_KEY_PREFIX, modelId, round);
+        CompositeKey key = stub.createCompositeKey(MODEL_SECRET_KEY, modelId, round);
         List<ModelSecret> modelSecretList = new ArrayList<>();
         try (QueryResultsIterator<KeyValue> results = stub.getPrivateDataByPartialCompositeKey(collectionName, key)) {
             for (KeyValue result : results) {
@@ -239,7 +319,7 @@ public final class Chaincode implements ContractInterface {
     public EndRoundModel ReadEndRoundModel(final Context ctx, final String modelId, final String round) throws Exception {
         ChaincodeStub stub = ctx.getStub();
 
-        CompositeKey key = stub.createCompositeKey(END_ROUND_MODEL_KEY_PREFIX, modelId, round);
+        CompositeKey key = stub.createCompositeKey(END_ROUND_MODEL_KEY, modelId, round);
 
         String endRoundModelJson = stub.getStringState(key.toString());
         if (endRoundModelJson == null || endRoundModelJson.length() == 0) {
@@ -314,7 +394,7 @@ public final class Chaincode implements ContractInterface {
     @Transaction(intent = Transaction.TYPE.EVALUATE)
     public boolean ModelExists(final Context ctx, final String modelId) {
         ChaincodeStub stub = ctx.getStub();
-        String key = stub.createCompositeKey(MODEL_METADATA_KEY_PREFIX, modelId).toString();
+        String key = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
         String modelJson = stub.getStringState(key);
 
         return (modelJson != null && !modelJson.isEmpty());

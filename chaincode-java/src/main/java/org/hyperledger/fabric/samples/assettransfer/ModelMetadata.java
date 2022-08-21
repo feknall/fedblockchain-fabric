@@ -23,15 +23,25 @@ public final class ModelMetadata {
     @Property()
     private final String secretsPerClient;
 
+    @Property()
+    private final String status;
+
+    @Property()
+    private final String trainingRounds;
+
 
     public ModelMetadata(@JsonProperty("modelId") final String modelId,
                          @JsonProperty("name") final String name,
                          @JsonProperty("clientsPerRound") final String clientsPerRound,
-                         @JsonProperty("secretsPerClient") final String secretsPerClient) {
+                         @JsonProperty("secretsPerClient") final String secretsPerClient,
+                         @JsonProperty("status") final String status,
+                         @JsonProperty("trainingRounds") final String trainingRounds) {
         this.modelId = modelId;
         this.name = name;
         this.clientsPerRound = clientsPerRound;
         this.secretsPerClient = secretsPerClient;
+        this.status = status;
+        this.trainingRounds = trainingRounds;
     }
 
     public String getModelId() {
@@ -50,6 +60,13 @@ public final class ModelMetadata {
         return name;
     }
 
+    public String getStatus() {
+        return status;
+    }
+
+    public String getTrainingRounds() {
+        return trainingRounds;
+    }
 
     public String serialize() {
         return new Gson().toJson(this);
@@ -58,6 +75,4 @@ public final class ModelMetadata {
     public static ModelMetadata deserialize(final String ser) {
         return new Gson().fromJson(ser, ModelMetadata.class);
     }
-
-
 }

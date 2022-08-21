@@ -9,8 +9,6 @@ import com.owlike.genson.annotation.JsonProperty;
 import org.hyperledger.fabric.contract.annotation.DataType;
 import org.hyperledger.fabric.contract.annotation.Property;
 
-import java.util.Objects;
-
 @DataType()
 public final class EndRoundModel {
 
@@ -20,24 +18,6 @@ public final class EndRoundModel {
     private final String round;
     @Property()
     private final String weights;
-
-    @Override
-    public boolean equals(final Object o) {
-        if (this == o) {
-            return true;
-        }
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-        EndRoundModel modelSecret = (EndRoundModel) o;
-        return Objects.equals(modelId, modelSecret.modelId) && Objects.equals(round, modelSecret.round) && Objects.equals(weights, modelSecret.weights);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(modelId, round, weights);
-    }
-
 
     public EndRoundModel(@JsonProperty("modelId") final String modelId, @JsonProperty("round") final String round, @JsonProperty("weights") final String weights) {
         this.modelId = modelId;
@@ -56,15 +36,6 @@ public final class EndRoundModel {
 
     public String getWeights() {
         return weights;
-    }
-
-    @Override
-    public String toString() {
-        return "Model{"
-                + "id='" + modelId
-                + ", round='" + round
-                + ", weights='" + weights
-                + '}';
     }
 
     public String serialize() {
