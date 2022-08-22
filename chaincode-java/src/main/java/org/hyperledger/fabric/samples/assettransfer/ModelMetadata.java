@@ -17,38 +17,42 @@ public final class ModelMetadata {
     @Property()
     private final String name;
     @Property()
-    private final String clientsPerRound;
+    private final int clientsPerRound;
     @Property()
-    private final String secretsPerClient;
+    private final int secretsPerClient;
     @Property()
     private final String status;
     @Property()
-    private final String trainingRounds;
+    private final int trainingRounds;
+    @Property()
+    private final int currentRound;
 
 
     public ModelMetadata(@JsonProperty("modelId") final String modelId,
                          @JsonProperty("name") final String name,
-                         @JsonProperty("clientsPerRound") final String clientsPerRound,
-                         @JsonProperty("secretsPerClient") final String secretsPerClient,
+                         @JsonProperty("clientsPerRound") final int clientsPerRound,
+                         @JsonProperty("secretsPerClient") final int secretsPerClient,
                          @JsonProperty("status") final String status,
-                         @JsonProperty("trainingRounds") final String trainingRounds) {
+                         @JsonProperty("trainingRounds") final int trainingRounds,
+                         @JsonProperty("currentRound") final int currentRound) {
         this.modelId = modelId;
         this.name = name;
         this.clientsPerRound = clientsPerRound;
         this.secretsPerClient = secretsPerClient;
         this.status = status;
         this.trainingRounds = trainingRounds;
+        this.currentRound = currentRound;
     }
 
     public String getModelId() {
         return modelId;
     }
 
-    public String getClientsPerRound() {
+    public int getClientsPerRound() {
         return clientsPerRound;
     }
 
-    public String getSecretsPerClient() {
+    public int getSecretsPerClient() {
         return secretsPerClient;
     }
 
@@ -60,8 +64,12 @@ public final class ModelMetadata {
         return status;
     }
 
-    public String getTrainingRounds() {
+    public int getTrainingRounds() {
         return trainingRounds;
+    }
+
+    public int getCurrentRound() {
+        return currentRound;
     }
 
     public String serialize() {
