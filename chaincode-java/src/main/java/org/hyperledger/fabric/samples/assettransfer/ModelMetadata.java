@@ -16,16 +16,12 @@ public final class ModelMetadata {
     private final String modelId;
     @Property()
     private final String name;
-
     @Property()
     private final String clientsPerRound;
-
     @Property()
     private final String secretsPerClient;
-
     @Property()
     private final String status;
-
     @Property()
     private final String trainingRounds;
 
