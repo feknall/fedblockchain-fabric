@@ -4,7 +4,6 @@
 
 package org.hyperledger.fabric.samples.assettransfer;
 
-import org.hyperledger.fabric.contract.ClientIdentity;
 import org.hyperledger.fabric.contract.Context;
 import org.hyperledger.fabric.contract.ContractInterface;
 import org.hyperledger.fabric.contract.annotation.Contact;
@@ -89,12 +88,12 @@ public final class Chaincode implements ContractInterface {
 
     // ------------------- START ADMIN ---------------------
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public void InitLedger(final Context ctx) {
+    public void initLedger(final Context ctx) {
 
     }
 
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata StartTraining(final Context ctx, final String modelId) {
+    public ModelMetadata startTraining(final Context ctx, final String modelId) {
         checkHasFlAdminRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -125,7 +124,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata CreateModelMetadata(final Context ctx, final String modelId,
+    public ModelMetadata createModelMetadata(final Context ctx, final String modelId,
                                              final String modelName, final String clientsPerRound,
                                              final String secretsPerClient, final String trainingRounds) {
         checkHasFlAdminRoleOrThrow(ctx);
@@ -156,7 +155,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public CheckInInfo GetCheckInInfo(final Context ctx) {
+    public CheckInInfo getCheckInInfo(final Context ctx) {
         checkHasFlAdminRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -176,7 +175,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public CheckInInfo GetSelectedTrainersForCurrentRound(final Context ctx) {
+    public CheckInInfo getSelectedTrainersForCurrentRound(final Context ctx) {
         checkHasFlAdminRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -238,6 +237,7 @@ public final class Chaincode implements ContractInterface {
         for (int i = 0; i < numberOfRequiredClients; i++) {
             TrainerMetadata old = checkedInClients.get(i);
             TrainerMetadata trainerMetadataNew = new TrainerMetadata(old.getClientId(),
+                    old.getUsername(),
                     old.getCheckedInTimestamp(),
                     modelMetadata.getCurrentRound());
 
@@ -257,7 +257,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public EndRoundModel GetTrainedModel(final Context ctx, final String modelId) {
+    public EndRoundModel getTrainedModel(final Context ctx, final String modelId) {
         ChaincodeStub stub = ctx.getStub();
         String modelMetadataKey = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
         String modelMetadataJson = stub.getStringState(modelMetadataKey);
@@ -280,7 +280,7 @@ public final class Chaincode implements ContractInterface {
 
     // ------------------- START TRAINER ---------------------
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata AddModelSecret(final Context ctx, final String modelId, final String round, final String weights) {
+    public ModelMetadata addModelSecret(final Context ctx, final String modelId, final String round, final String weights) {
         checkHasTrainerRoleOrThrow(ctx);
         checkTrainerIsSelectedForRoundOrThrow(ctx);
 
@@ -293,7 +293,8 @@ public final class Chaincode implements ContractInterface {
         String modelSecretJson = modelSecret.serialize();
 
         String collectionName = getCollectionName(ctx);
-        String secretKey = stub.createCompositeKey(MODEL_SECRET_KEY, modelId, round, ctx.getClientIdentity().getId()).toString();
+        String username = getClientUsername(ctx);
+        String secretKey = stub.createCompositeKey(MODEL_SECRET_KEY, modelId, round, username).toString();
 
         stub.putPrivateData(collectionName, secretKey, modelSecretJson);
 
@@ -323,7 +324,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public EndRoundModel ReadEndRoundModel(final Context ctx, final String modelId, final String round) throws Exception {
+    public EndRoundModel readEndRoundModel(final Context ctx, final String modelId, final String round) throws Exception {
         ChaincodeStub stub = ctx.getStub();
 
         CompositeKey key = stub.createCompositeKey(END_ROUND_MODEL_KEY, modelId, round);
@@ -342,25 +343,31 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public TrainerMetadata CheckInTrainer(final Context ctx) {
+    public TrainerMetadata checkInTrainer(final Context ctx) {
         String username = getClientUsername(ctx);
 
         ChaincodeStub stub = ctx.getStub();
         String key = stub.createCompositeKey(CHECK_IN_TRAINER_KEY, username).toString();
 
         String timestamp = String.valueOf(System.currentTimeMillis());
-        TrainerMetadata trainerMetadata = new TrainerMetadata(ctx.getClientIdentity().getId(), timestamp);
+        TrainerMetadata trainerMetadata = new TrainerMetadata(ctx.getClientIdentity().getId(), username, timestamp);
         stub.putStringState(key, trainerMetadata.serialize());
 
         return trainerMetadata;
     }
 
     private void checkHasTrainerRoleOrThrow(final Context ctx) {
-        if (ctx.getClientIdentity().assertAttributeValue(TRAINER_ATTRIBUTE, Boolean.FALSE.toString())) {
-            String errorMessage = "User " + ctx.getClientIdentity().getId() + "has no trainer attribute";
-            logger.log(Level.SEVERE, errorMessage);
-            throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+        if (checkHasTrainerAttribute(ctx)) {
+            return;
         }
+        String errorMessage = "User " + ctx.getClientIdentity().getId() + " has no trainer attribute";
+        logger.log(Level.SEVERE, errorMessage);
+        throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Boolean checkHasTrainerAttribute(final Context ctx) {
+        return ctx.getClientIdentity().assertAttributeValue(TRAINER_ATTRIBUTE, Boolean.TRUE.toString());
     }
     // ------------------- FINISH TRAINER ---------------------
 
@@ -384,7 +391,7 @@ public final class Chaincode implements ContractInterface {
 
     // ------------------- START LEAD AGGREGATOR ---------------------
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata AddEndRoundModel(final Context ctx, final String modelId, final String round, final String weights) {
+    public ModelMetadata addEndRoundModel(final Context ctx, final String modelId, final String round, final String weights) {
         checkHasLeadAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -424,7 +431,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public AggregatedSecret[] ReadAggregatedSecret(final Context ctx, final String modelId, final String round) throws Exception {
+    public AggregatedSecret[] readAggregatedSecret(final Context ctx, final String modelId, final String round) throws Exception {
         checkHasLeadAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -450,17 +457,23 @@ public final class Chaincode implements ContractInterface {
     }
 
     private void checkHasLeadAggregatorRoleOrThrow(final Context ctx) {
-        if (ctx.getClientIdentity().assertAttributeValue(LEAD_AGGREGATOR_ATTRIBUTE, Boolean.FALSE.toString())) {
-            String errorMessage = "User " + ctx.getClientIdentity().getId() + "has no leadAggregator attribute";
-            logger.log(Level.SEVERE, errorMessage);
-            throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+        if (checkHasLeadAggregatorAttribute(ctx)) {
+            return;
         }
+        String errorMessage = "User " + ctx.getClientIdentity().getId() + " has no leadAggregator attribute";
+        logger.log(Level.SEVERE, errorMessage);
+        throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Boolean checkHasLeadAggregatorAttribute(final Context ctx) {
+        return ctx.getClientIdentity().assertAttributeValue(LEAD_AGGREGATOR_ATTRIBUTE, Boolean.TRUE.toString());
     }
     // ------------------- FINISH LEAD AGGREGATOR ---------------------
 
     // ------------------- START AGGREGATOR ---------------------
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata AddAggregatedSecret(final Context ctx, final String modelId, final String round, final String weights) {
+    public ModelMetadata addAggregatedSecret(final Context ctx, final String modelId, final String round, final String weights) {
         checkHasAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -471,7 +484,8 @@ public final class Chaincode implements ContractInterface {
         AggregatedSecret aggregatedSecret = new AggregatedSecret(modelId, round, weights);
         String modelUpdateJson = aggregatedSecret.serialize();
 
-        String key = stub.createCompositeKey(AGGREGATED_SECRET_KEY, modelId, round, ctx.getClientIdentity().getId()).toString();
+        String username = getClientUsername(ctx);
+        String key = stub.createCompositeKey(AGGREGATED_SECRET_KEY, modelId, round, username).toString();
         stub.putPrivateData(AGGREGATED_SECRET_COLLECTION, key, modelUpdateJson);
 
         String counterKey = stub.createCompositeKey(AGGREGATED_SECRET_COUNTER_KEY, modelId, round).toString();
@@ -499,7 +513,7 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public ModelSecret[] ReadModelSecrets(final Context ctx, final String modelId, final String round) throws Exception {
+    public ModelSecret[] readModelSecrets(final Context ctx, final String modelId, final String round) throws Exception {
         checkHasAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -522,11 +536,17 @@ public final class Chaincode implements ContractInterface {
     }
 
     private void checkHasAggregatorRoleOrThrow(final Context ctx) {
-        if (ctx.getClientIdentity().assertAttributeValue(AGGREGATOR_ATTRIBUTE, Boolean.FALSE.toString())) {
-            String errorMessage = "User " + ctx.getClientIdentity().getId() + "has no aggregator attribute";
-            logger.log(Level.SEVERE, errorMessage);
-            throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+        if (checkHasAggregatorAttribute(ctx)) {
+            return;
         }
+        String errorMessage = "User " + ctx.getClientIdentity().getId() + "has no aggregator attribute";
+        logger.log(Level.SEVERE, errorMessage);
+        throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Boolean checkHasAggregatorAttribute(final Context ctx) {
+        return ctx.getClientIdentity().assertAttributeValue(AGGREGATOR_ATTRIBUTE, Boolean.TRUE.toString());
     }
     // ------------------- FINISH AGGREGATOR ---------------------
 
@@ -542,16 +562,22 @@ public final class Chaincode implements ContractInterface {
     }
 
     private void checkHasFlAdminRoleOrThrow(final Context ctx) {
-        if (ctx.getClientIdentity().assertAttributeValue(FL_ADMIN_ATTRIBUTE, Boolean.FALSE.toString())) {
-            String errorMessage = "User " + ctx.getClientIdentity().getId() + "has no admin attribute";
-            logger.log(Level.SEVERE, errorMessage);
-            throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+        if (checkHasFlAdminAttribute(ctx)) {
+            return;
         }
+        String errorMessage = "User " + ctx.getClientIdentity().getId() + "has no admin attribute";
+        logger.log(Level.SEVERE, errorMessage);
+        throw new ChaincodeException(errorMessage, ChaincodeErrors.INVALID_ACCESS.toString());
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Boolean checkHasFlAdminAttribute(final Context ctx) {
+        return ctx.getClientIdentity().assertAttributeValue(FL_ADMIN_ATTRIBUTE, Boolean.TRUE.toString());
     }
 
     // ------------------- START GENERAL ---------------------
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public PersonalInfo GetPersonalInfo(final Context ctx) {
+    public PersonalInfo getPersonalInfo(final Context ctx) {
         ChaincodeStub stub = ctx.getStub();
 
         String username = getClientUsername(ctx);
@@ -559,25 +585,25 @@ public final class Chaincode implements ContractInterface {
 
         Boolean checkedIn = notNullAndEmpty(stub.getStringState(checkInKey)) ? Boolean.TRUE : Boolean.FALSE;
         String mspId = ctx.getClientIdentity().getMSPID();
-        String role = getRole(ctx.getClientIdentity());
+        String role = getRole(ctx);
 
         String clientId = ctx.getClientIdentity().getId();
         if (role.equals(TRAINER_ATTRIBUTE)) {
-            String key = stub.createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY, getClientUsername(ctx)).toString();
+            String key = stub.createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY, username).toString();
             String value = stub.getStringState(key);
             Boolean selectedForRound = notNullAndEmpty(value) ? Boolean.TRUE : Boolean.FALSE;
-            return new PersonalInfo(clientId, role, mspId, selectedForRound, checkedIn);
+            return new PersonalInfo(clientId, role, mspId, username, selectedForRound, checkedIn);
         }
 
-        return new PersonalInfo(clientId, role, mspId, null, checkedIn);
+        return new PersonalInfo(clientId, role, mspId, username, null, checkedIn);
     }
 
-    private String getRole(final ClientIdentity identity) {
-        if (identity.assertAttributeValue(AGGREGATOR_ATTRIBUTE, Boolean.TRUE.toString())) {
+    private String getRole(final Context ctx) {
+        if (checkHasAggregatorAttribute(ctx)) {
             return AGGREGATOR_ATTRIBUTE;
-        } else if (identity.assertAttributeValue(TRAINER_ATTRIBUTE, Boolean.TRUE.toString())) {
+        } else if (checkHasTrainerAttribute(ctx)) {
             return TRAINER_ATTRIBUTE;
-        } else if (identity.assertAttributeValue(LEAD_AGGREGATOR_ATTRIBUTE, Boolean.TRUE.toString())) {
+        } else if (checkHasLeadAggregatorAttribute(ctx)) {
             return LEAD_AGGREGATOR_ATTRIBUTE;
         }
         return "unknown";

@@ -13,18 +13,24 @@ public final class TrainerMetadata {
     private final String checkedInTimestamp;
     @Property()
     private final int roundSelectedFor;
+    @Property()
+    private final String username;
 
     public TrainerMetadata(@JsonProperty("clientId") final String clientId,
+                           @JsonProperty("username") final String username,
                            @JsonProperty("checkedInTimestamp") final String checkedInTimestamp,
                            @JsonProperty("roundSelectedFor") final int roundSelectedFor) {
         this.clientId = clientId;
+        this.username = username;
         this.checkedInTimestamp = checkedInTimestamp;
         this.roundSelectedFor = roundSelectedFor;
     }
 
     public TrainerMetadata(@JsonProperty("clientId") final String clientId,
+                           @JsonProperty("username") final String username,
                            @JsonProperty("checkedInTimestamp") final String checkedInTimestamp) {
         this.clientId = clientId;
+        this.username = username;
         this.checkedInTimestamp = checkedInTimestamp;
         this.roundSelectedFor = -1;
     }
@@ -40,6 +46,10 @@ public final class TrainerMetadata {
 
     public int getRoundSelectedFor() {
         return roundSelectedFor;
+    }
+
+    public String getUsername() {
+        return username;
     }
 
     public String serialize() {

@@ -16,18 +16,21 @@ public final class PersonalInfo {
     private final Boolean checkedIn;
     @Property()
     private final String mspId;
+    @Property()
+    private final String username;
 
     public PersonalInfo(@JsonProperty("clientId") final String clientId,
                         @JsonProperty("role") final String role,
                         @JsonProperty("mspId") final String mspId,
+                        @JsonProperty("username") final String username,
                         @JsonProperty("selectedForRound") final Boolean selectedForRound,
-                        @JsonProperty("checkedIn") final Boolean checkedIn
-                        ) {
+                        @JsonProperty("checkedIn") final Boolean checkedIn) {
         this.clientId = clientId;
         this.role = role;
         this.selectedForRound = selectedForRound;
         this.checkedIn = checkedIn;
         this.mspId = mspId;
+        this.username = username;
     }
 
     public String getRole() {
@@ -44,6 +47,10 @@ public final class PersonalInfo {
 
     public String getMspId() {
         return mspId;
+    }
+
+    public String getUsername() {
+        return username;
     }
 
     public Boolean getCheckedIn() {
