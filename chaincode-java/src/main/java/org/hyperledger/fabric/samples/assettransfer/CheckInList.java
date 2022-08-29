@@ -7,12 +7,12 @@ import org.hyperledger.fabric.contract.annotation.Property;
 import java.util.List;
 
 @DataType()
-public final class CheckInInfo {
+public final class CheckInList {
 
     @Property()
     private final List<TrainerMetadata> checkedInTrainers;
 
-    public CheckInInfo(@JsonProperty("checkedInTrainers") final List<TrainerMetadata> checkedInTrainers) {
+    public CheckInList(@JsonProperty("checkedInTrainers") final List<TrainerMetadata> checkedInTrainers) {
         this.checkedInTrainers = checkedInTrainers;
     }
 

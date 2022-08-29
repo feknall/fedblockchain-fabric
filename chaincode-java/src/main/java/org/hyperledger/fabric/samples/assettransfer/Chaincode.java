@@ -78,7 +78,6 @@ public final class Chaincode implements ContractInterface {
     static final String START_TRAINING_EVENT = "START_TRAINING_EVENT";
     static final String CREATE_MODEL_METADATA_EVENT = "CREATE_MODEL_METADATA_EVENT";
     static final String AGGREGATED_SECRET_ADDED_EVENT = "AGGREGATED_SECRET_ADDED_EVENT";
-    static final String CLIENT_SELECTED_FOR_ROUND_EVENT = "CLIENT_SELECTED_FOR_ROUND_EVENT";
 
     static final String MODEL_METADATA_STATUS_INITIATED = "initiated";
     static final String MODEL_METADATA_STATUS_STARTED = "started";
@@ -116,9 +115,9 @@ public final class Chaincode implements ContractInterface {
         String newJson = newModelMetadata.serialize();
         stub.putStringState(key, newJson);
 
-        stub.setEvent(START_TRAINING_EVENT, newJson.getBytes());
-
         selectTrainersForRound(ctx, newModelMetadata);
+
+        stub.setEvent(START_TRAINING_EVENT, newJson.getBytes());
 
         return newModelMetadata;
     }
@@ -155,7 +154,15 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public CheckInInfo getCheckInInfo(final Context ctx) {
+    public ModelMetadata getModelMetadata(final Context ctx, final String modelId) {
+        ChaincodeStub stub = ctx.getStub();
+        String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(stub, modelId);
+
+        return ModelMetadata.deserialize(modelMetadataJson);
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public CheckInList getCheckInInfo(final Context ctx) {
         checkHasFlAdminRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -171,29 +178,7 @@ public final class Chaincode implements ContractInterface {
             }
         }
 
-        return new CheckInInfo(trainerMetadataList);
-    }
-
-    @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public CheckInInfo getSelectedTrainersForCurrentRound(final Context ctx) {
-        checkHasFlAdminRoleOrThrow(ctx);
-
-        ChaincodeStub stub = ctx.getStub();
-
-        String selectedClientKey = stub.createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY).toString();
-        String collectionName = getCollectionName(ctx);
-        QueryResultsIterator<KeyValue> iterator = stub.getPrivateDataByPartialCompositeKey(collectionName, selectedClientKey);
-
-        List<TrainerMetadata> trainerMetadataList = new ArrayList<>();
-        for (KeyValue result : iterator) {
-            String value = result.getStringValue();
-            if (notNullAndEmpty(value)) {
-                TrainerMetadata trainerMetadata = TrainerMetadata.deserialize(value);
-                trainerMetadataList.add(trainerMetadata);
-            }
-        }
-
-        return new CheckInInfo(trainerMetadataList);
+        return new CheckInList(trainerMetadataList);
     }
 
     private void selectTrainersForRound(final Context ctx, final ModelMetadata modelMetadata) {
@@ -241,14 +226,11 @@ public final class Chaincode implements ContractInterface {
                     old.getCheckedInTimestamp(),
                     modelMetadata.getCurrentRound());
 
-            String username = getClientUsername(ctx);
             String selectedClientKey = stub
-                    .createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY, username)
+                    .createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY, trainerMetadataNew.getUsername())
                     .toString();
             String trainerMetadataStr = trainerMetadataNew.serialize();
             stub.putStringState(selectedClientKey, trainerMetadataStr);
-
-            stub.setEvent(CLIENT_SELECTED_FOR_ROUND_EVENT, trainerMetadataStr.getBytes());
         }
     }
 
@@ -280,7 +262,7 @@ public final class Chaincode implements ContractInterface {
 
     // ------------------- START TRAINER ---------------------
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata addModelSecret(final Context ctx, final String modelId, final String round, final String weights) {
+    public ModelMetadata addModelSecret(final Context ctx, final String modelId, final String weights) {
         checkHasTrainerRoleOrThrow(ctx);
         checkTrainerIsSelectedForRoundOrThrow(ctx);
 
@@ -288,6 +270,8 @@ public final class Chaincode implements ContractInterface {
 
         String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(stub, modelId);
         ModelMetadata modelMetadata = ModelMetadata.deserialize(modelMetadataJson);
+
+        String round = String.valueOf(modelMetadata.getCurrentRound());
 
         ModelSecret modelSecret = new ModelSecret(modelId, round, weights);
         String modelSecretJson = modelSecret.serialize();
@@ -300,25 +284,28 @@ public final class Chaincode implements ContractInterface {
 
         String counterKey = stub.createCompositeKey(MODEL_SECRET_COUNTER_KEY, modelId, round).toString();
         String oldCounterValue = new String(stub.getPrivateData(collectionName, counterKey));
+        logger.log(Level.INFO, "oldCounterValue: " + oldCounterValue);
 
         int newValue = 1;
         if (!oldCounterValue.isEmpty()) {
             newValue = Integer.parseInt(oldCounterValue) + 1;
         }
-
         stub.putPrivateData(collectionName, counterKey, String.valueOf(newValue));
-
+        logger.log(Level.INFO, "CounterKey: " +  counterKey);
         byte[] event = new ModelSecret(modelSecret.getModelId(), String.valueOf(newValue), null)
                 .serialize()
                 .getBytes();
+
         stub.setEvent(MODEL_SECRET_ADDED_EVENT, event);
 
         if (newValue == modelMetadata.getClientsPerRound()) {
+            logger.log(Level.INFO, "Enough secrets are received!");
             stub.setEvent(ALL_SECRETS_RECEIVED_EVENT, event);
+        } else {
+            logger.log(Level.INFO, "Looking for more secrets. Current value: " + newValue);
         }
 
         logger.log(Level.INFO, "ModelUpdate " + secretKey + " stored successfully in " + collectionName);
-        logger.log(Level.INFO, "ModelUpdate JSON: " + modelSecretJson);
 
         return modelMetadata;
     }
@@ -369,6 +356,21 @@ public final class Chaincode implements ContractInterface {
     public Boolean checkHasTrainerAttribute(final Context ctx) {
         return ctx.getClientIdentity().assertAttributeValue(TRAINER_ATTRIBUTE, Boolean.TRUE.toString());
     }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Boolean checkIAmSelectedForRound(final Context ctx) {
+        ChaincodeStub stub = ctx.getStub();
+
+        String selectedClientKey = stub
+                .createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY, getClientUsername(ctx))
+                .toString();
+        String value = stub.getStringState(selectedClientKey);
+        if (notNullAndEmpty(value)) {
+            return Boolean.TRUE;
+        } else {
+            return Boolean.FALSE;
+        }
+    }
     // ------------------- FINISH TRAINER ---------------------
 
     private void checkTrainerIsSelectedForRoundOrThrow(final Context ctx) {
@@ -376,12 +378,10 @@ public final class Chaincode implements ContractInterface {
 
         ChaincodeStub stub = ctx.getStub();
         String selectedClientKey = stub.createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY, username).toString();
-        String collectionName = getCollectionName(ctx);
-        String value = new String(stub.getPrivateData(collectionName, selectedClientKey));
+        String value = stub.getStringState(selectedClientKey);
 
         if (notNullAndEmpty(value)) {
             logger.log(Level.INFO, String.format("Trainer %s is selected for this round", username));
-            stub.delPrivateData(collectionName, selectedClientKey);
         } else {
             String errorMessage = String.format("Trainer %s is NOT selected for this round", username);
             logger.log(Level.SEVERE, errorMessage);
@@ -513,7 +513,17 @@ public final class Chaincode implements ContractInterface {
     }
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
-    public ModelSecret[] readModelSecrets(final Context ctx, final String modelId, final String round) throws Exception {
+    public ModelSecretList readModelSecretsForCurrentRound(final Context ctx, final String modelId) throws Exception {
+        ChaincodeStub stub = ctx.getStub();
+
+        String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(stub, modelId);
+        ModelMetadata modelMetadata = ModelMetadata.deserialize(modelMetadataJson);
+
+        return readModelSecrets(ctx, modelId, String.valueOf(modelMetadata.getCurrentRound()));
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public ModelSecretList readModelSecrets(final Context ctx, final String modelId, final String round) throws Exception {
         checkHasAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -532,7 +542,7 @@ public final class Chaincode implements ContractInterface {
             }
         }
 
-        return modelSecretList.toArray(new ModelSecret[0]);
+        return new ModelSecretList(modelSecretList);
     }
 
     private void checkHasAggregatorRoleOrThrow(final Context ctx) {
@@ -551,7 +561,8 @@ public final class Chaincode implements ContractInterface {
     // ------------------- FINISH AGGREGATOR ---------------------
 
     private String toJsonIfModelMetadataExistsOrThrow(final ChaincodeStub stub, final String modelId) {
-        String modelJson = stub.getStringState(modelId);
+        String key = stub.createCompositeKey(MODEL_METADATA_KEY, modelId).toString();
+        String modelJson = stub.getStringState(key);
         if (modelJson == null || modelJson.isEmpty()) {
             String errorMessage = String.format("ModelMetadata %s does not exist", modelId);
             logger.log(Level.SEVERE, errorMessage);
@@ -576,6 +587,26 @@ public final class Chaincode implements ContractInterface {
     }
 
     // ------------------- START GENERAL ---------------------
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public CheckInList getSelectedTrainersForCurrentRound(final Context ctx) {
+        ChaincodeStub stub = ctx.getStub();
+
+        String selectedClientKey = stub.createCompositeKey(CLIENT_SELECTED_FOR_ROUND_KEY).toString();
+        QueryResultsIterator<KeyValue> iterator = stub.getStateByPartialCompositeKey(selectedClientKey);
+
+        List<TrainerMetadata> trainerMetadataList = new ArrayList<>();
+        for (KeyValue result : iterator) {
+            String value = result.getStringValue();
+            if (notNullAndEmpty(value)) {
+                TrainerMetadata trainerMetadata = TrainerMetadata.deserialize(value);
+                trainerMetadataList.add(trainerMetadata);
+            }
+        }
+
+        return new CheckInList(trainerMetadataList);
+    }
+
     @Transaction(intent = Transaction.TYPE.EVALUATE)
     public PersonalInfo getPersonalInfo(final Context ctx) {
         ChaincodeStub stub = ctx.getStub();
