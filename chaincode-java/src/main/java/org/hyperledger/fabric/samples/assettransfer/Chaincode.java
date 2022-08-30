@@ -282,33 +282,17 @@ public final class Chaincode implements ContractInterface {
 
         stub.putPrivateData(collectionName, secretKey, modelSecretJson);
 
-        String counterKey = stub.createCompositeKey(MODEL_SECRET_COUNTER_KEY, modelId, round).toString();
-        String oldCounterValue = new String(stub.getPrivateData(collectionName, counterKey));
-        logger.log(Level.INFO, "oldCounterValue: " + oldCounterValue);
-
-        int newValue = 1;
-        if (!oldCounterValue.isEmpty()) {
-            newValue = Integer.parseInt(oldCounterValue) + 1;
-        }
-        stub.putPrivateData(collectionName, counterKey, String.valueOf(newValue));
-        logger.log(Level.INFO, "CounterKey: " +  counterKey);
-        byte[] event = new ModelSecret(modelSecret.getModelId(), String.valueOf(newValue), null)
+        byte[] event = new ModelSecret(modelSecret.getModelId(), null, null)
                 .serialize()
                 .getBytes();
 
         stub.setEvent(MODEL_SECRET_ADDED_EVENT, event);
 
-        if (newValue == modelMetadata.getClientsPerRound()) {
-            logger.log(Level.INFO, "Enough secrets are received!");
-            stub.setEvent(ALL_SECRETS_RECEIVED_EVENT, event);
-        } else {
-            logger.log(Level.INFO, "Looking for more secrets. Current value: " + newValue);
-        }
-
         logger.log(Level.INFO, "ModelUpdate " + secretKey + " stored successfully in " + collectionName);
 
         return modelMetadata;
     }
+
 
     @Transaction(intent = Transaction.TYPE.EVALUATE)
     public EndRoundModel readEndRoundModel(final Context ctx, final String modelId, final String round) throws Exception {
@@ -472,8 +456,56 @@ public final class Chaincode implements ContractInterface {
     // ------------------- FINISH LEAD AGGREGATOR ---------------------
 
     // ------------------- START AGGREGATOR ---------------------
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    private int getNumberOfRequiredSecrets(final Context ctx, final String modelId) {
+        String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(ctx.getStub(), modelId);
+        ModelMetadata modelMetadata = ModelMetadata.deserialize(modelMetadataJson);
+        return modelMetadata.getClientsPerRound();
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public int getNumberOfReceivedSecrets(final Context ctx, final String modelId) throws Exception {
+        //Do access control later
+
+        ChaincodeStub stub = ctx.getStub();
+
+        String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(stub, modelId);
+        ModelMetadata modelMetadata = ModelMetadata.deserialize(modelMetadataJson);
+
+        String round = String.valueOf(modelMetadata.getCurrentRound());
+        String secretKey = stub.createCompositeKey(MODEL_SECRET_KEY, modelId, round).toString();
+        int counter = 0;
+        try (QueryResultsIterator<KeyValue> results = stub.getPrivateDataByPartialCompositeKey(getCollectionName(ctx), secretKey)) {
+            for (KeyValue result : results) {
+                if (notNullAndEmpty(result.getStringValue())) {
+                    counter++;
+                }
+            }
+        }
+        return counter;
+    }
+
+    @Transaction(intent = Transaction.TYPE.EVALUATE)
+    public Boolean checkAllSecretsReceived(final Context ctx, final String modelId) throws Exception {
+        //Do access control later
+        int received = getNumberOfReceivedSecrets(ctx, modelId);
+        int required = getNumberOfRequiredSecrets(ctx, modelId);
+
+        if (received == required) {
+            logger.log(Level.INFO, "Enough secrets are received.");
+            return true;
+        } else if (received > required) {
+            logger.log(Level.SEVERE, "Something is wrong with secrets counter.");
+        } else {
+            logger.log(Level.INFO, "Looking for more secrets. Current value: " + received + " of " + required);
+        }
+        return false;
+    }
+
     @Transaction(intent = Transaction.TYPE.SUBMIT)
-    public ModelMetadata addAggregatedSecret(final Context ctx, final String modelId, final String round, final String weights) {
+    public ModelMetadata addAggregatedSecret(final Context ctx, final String modelId, final String weights) {
+        logger.log(Level.INFO, "Start addAggregatedSecret");
         checkHasAggregatorRoleOrThrow(ctx);
 
         ChaincodeStub stub = ctx.getStub();
@@ -481,34 +513,24 @@ public final class Chaincode implements ContractInterface {
         String modelMetadataJson = toJsonIfModelMetadataExistsOrThrow(stub, modelId);
         ModelMetadata modelMetadata = ModelMetadata.deserialize(modelMetadataJson);
 
+        String round = String.valueOf(modelMetadata.getCurrentRound());
+
         AggregatedSecret aggregatedSecret = new AggregatedSecret(modelId, round, weights);
-        String modelUpdateJson = aggregatedSecret.serialize();
+        String aggregatedSecretJson = aggregatedSecret.serialize();
 
         String username = getClientUsername(ctx);
         String key = stub.createCompositeKey(AGGREGATED_SECRET_KEY, modelId, round, username).toString();
-        stub.putPrivateData(AGGREGATED_SECRET_COLLECTION, key, modelUpdateJson);
+        logger.log(Level.INFO, "Key: " + key);
+        stub.putPrivateData(AGGREGATED_SECRET_COLLECTION, key, aggregatedSecretJson);
 
-        String counterKey = stub.createCompositeKey(AGGREGATED_SECRET_COUNTER_KEY, modelId, round).toString();
-        String oldCounterValue = stub.getStringState(counterKey);
-
-        int newValue = 1;
-        if (!oldCounterValue.isEmpty()) {
-            newValue = Integer.parseInt(oldCounterValue) + 1;
-        }
-
-        stub.putStringState(counterKey, String.valueOf(newValue));
-
-        byte[] event = new AggregatedSecret(aggregatedSecret.getModelId(), aggregatedSecret.getRound(), null)
+        byte[] event = new AggregatedSecret(aggregatedSecret.getModelId(), null, null)
                 .serialize()
                 .getBytes();
         stub.setEvent(AGGREGATED_SECRET_ADDED_EVENT, event);
 
-        if (newValue == modelMetadata.getSecretsPerClient()) {
-            stub.setEvent(AGGREGATION_FINISHED_EVENT, event);
-        }
-
         logger.log(Level.INFO, "AggregatedModelUpdate " + key + " stored successfully in " + AGGREGATED_SECRET_COLLECTION);
-        logger.log(Level.INFO, "ModelUpdate JSON: " + modelUpdateJson);
+        logger.log(Level.INFO, "ModelUpdate JSON: " + aggregatedSecretJson);
+        logger.log(Level.INFO, "Finish addAggregatedSecret");
         return modelMetadata;
     }
 
@@ -532,7 +554,7 @@ public final class Chaincode implements ContractInterface {
         List<ModelSecret> modelSecretList = new ArrayList<>();
         try (QueryResultsIterator<KeyValue> results = stub.getPrivateDataByPartialCompositeKey(collectionName, key)) {
             for (KeyValue result : results) {
-                if (result.getStringValue() == null || result.getStringValue().length() == 0) {
+                if (!notNullAndEmpty(result.getStringValue())) {
                     logger.log(Level.SEVERE, "Invalid ModelUpdate json: %s\n", result.getStringValue());
                     continue;
                 }
