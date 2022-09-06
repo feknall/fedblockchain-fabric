@@ -17,13 +17,17 @@ public final class ModelSecret {
     private final int round;
     @Property()
     private final String weights;
+    @Property()
+    private final int datasetSize;
 
     public ModelSecret(@JsonProperty("modelId") final String modelId,
                        @JsonProperty("round") final int round,
-                       @JsonProperty("weights") final String weights) {
+                       @JsonProperty("weights") final String weights,
+                       @JsonProperty("datasetSize") final int datasetSize) {
         this.modelId = modelId;
         this.round = round;
         this.weights = weights;
+        this.datasetSize = datasetSize;
     }
 
     public String getModelId() {
@@ -36,6 +40,10 @@ public final class ModelSecret {
 
     public String getWeights() {
         return weights;
+    }
+
+    public int getDatasetSize() {
+        return datasetSize;
     }
 
     public String serialize() {
