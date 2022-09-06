@@ -15,12 +15,12 @@ public final class AggregatedSecret {
     @Property()
     private final String modelId;
     @Property()
-    private final String round;
+    private final int round;
     @Property()
     private final String weights;
 
     public AggregatedSecret(@JsonProperty("modelId") final String modelId,
-                            @JsonProperty("round") final String round,
+                            @JsonProperty("round") final int round,
                             @JsonProperty("weights") final String weights) {
         this.modelId = modelId;
         this.round = round;
@@ -31,7 +31,7 @@ public final class AggregatedSecret {
         return modelId;
     }
 
-    public String getRound() {
+    public int getRound() {
         return round;
     }
 

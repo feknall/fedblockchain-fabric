@@ -11,15 +11,16 @@ import org.hyperledger.fabric.contract.annotation.Property;
 
 @DataType()
 public final class ModelSecret {
-
     @Property()
     private final String modelId;
     @Property()
-    private final String round;
+    private final int round;
     @Property()
     private final String weights;
 
-    public ModelSecret(@JsonProperty("modelId") final String modelId, @JsonProperty("round") final String round, @JsonProperty("weights") final String weights) {
+    public ModelSecret(@JsonProperty("modelId") final String modelId,
+                       @JsonProperty("round") final int round,
+                       @JsonProperty("weights") final String weights) {
         this.modelId = modelId;
         this.round = round;
         this.weights = weights;
@@ -29,15 +30,13 @@ public final class ModelSecret {
         return modelId;
     }
 
-
-    public String getRound() {
+    public int getRound() {
         return round;
     }
 
     public String getWeights() {
         return weights;
     }
-
 
     public String serialize() {
         return new Gson().toJson(this);
